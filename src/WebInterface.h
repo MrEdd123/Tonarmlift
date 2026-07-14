@@ -41,6 +41,7 @@ private:
     void _handleMoveBottom();
     void _handleSetTop();
     void _handleSetBottom();
+    void _handleSetSpeed();
     void _handleMove();
     void _handleNotFound();
 };

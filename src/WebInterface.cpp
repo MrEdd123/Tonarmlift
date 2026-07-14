@@ -36,6 +36,7 @@ void WebInterface::begin() {
     _server.on("/moveBottom",    HTTP_POST, [this](){ _handleMoveBottom(); });
     _server.on("/setRefTop",     HTTP_POST, [this](){ _handleSetTop(); });
     _server.on("/setRefBottom",  HTTP_POST, [this](){ _handleSetBottom(); });
+    _server.on("/setSpeed",      HTTP_POST, [this](){ _handleSetSpeed(); });
     _server.on("/moveToPos",     HTTP_POST, [this](){ _handleMove(); });
     _server.onNotFound([this](){ _handleNotFound(); });
 
@@ -105,6 +106,13 @@ String WebInterface::_buildHtmlPage() {
                    margin: 20px 0 10px; }
   .btn-set { background: #533483; color: #fff; margin-bottom: 8px; }
   .btn-set:last-of-type { margin-bottom: 0; }
+  .speed-row { display: flex; align-items: center; gap: 12px; margin: 16px 0 8px; }
+  .speed-row label { font-size: 0.8rem; text-transform: uppercase; opacity: 0.7; white-space: nowrap; }
+  .speed-row input[type="range"] { flex: 1; -webkit-appearance: none; height: 6px;
+    border-radius: 3px; background: #0f3460; outline: none; }
+  .speed-row input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none;
+    width: 20px; height: 20px; border-radius: 50%; background: #533483; cursor: pointer; }
+  .speed-row .speed-val { font-size: 1rem; font-weight: 700; min-width: 40px; text-align: right; }
   .toast { display: none; background: #2ecc71; color: #fff; text-align: center;
            padding: 10px; border-radius: 8px; margin-top: 16px;
            font-weight: 500; transition: opacity 0.3s; }
@@ -152,6 +160,15 @@ String WebInterface::_buildHtmlPage() {
     ⟳  Zum anderen Endpunkt
   </button>
 
+  <div class="section-title">Geschwindigkeit</div>
+  <div class="speed-row">
+    <label>Langsam</label>
+    <input type="range" id="speedSlider" min="1" max="30" value="5"
+      oninput="speedChanged(this.value)">
+    <label>Schnell</label>
+    <span class="speed-val" id="speedVal">5</span>
+  </div>
+
   <div class="section-title">Endpunkte setzen (aktuelle Position)</div>
   <button class="btn btn-set" onclick="setRefTop()">   ⬆  Als oberen Endpunkt speichern</button>
   <button class="btn btn-set" onclick="setRefBottom()">⬇  Als unteren Endpunkt speichern</button>
@@ -191,6 +208,8 @@ function fetchStatus() {
       document.getElementById('pos').textContent       = d.position;
       document.getElementById('refTop').textContent    = d.refTop;
       document.getElementById('refBottom').textContent = d.refBottom;
+      document.getElementById('speedSlider').value     = d.stepDelay;
+      document.getElementById('speedVal').textContent  = d.stepDelay;
       if (!d.moving) {
         document.getElementById('status').textContent = 'Bereit';
         btnToggle.disabled = false;
@@ -291,6 +310,15 @@ function setRefTop() {
       else showToast(d.error || 'Fehler', true);
     })
     .catch(() => showToast('Verbindungsfehler', true));
+}
+
+function speedChanged(val) {
+  document.getElementById('speedVal').textContent = val;
+  fetch(API + '/setSpeed', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'delay=' + val
+  }).catch(() => {});
 }
 
 function setRefBottom() {
@@ -435,6 +463,24 @@ void WebInterface::_handleSetBottom() {
     _lift.setRefBottom(0);
     _lift.savePosition();
     String json = "{\"success\":true}\n";
+    _server.send(200, "application/json", json);
+}
+
+// ============================================================
+//  Route: Geschwindigkeit setzen (delay=1-30)
+// ============================================================
+void WebInterface::_handleSetSpeed() {
+    String json;
+    if (!_server.hasArg("delay")) {
+        json = "{\"success\":false,\"error\":\"Parameter 'delay' fehlt\"}\n";
+        _server.send(400, "application/json", json);
+        return;
+    }
+    int ms = _server.arg("delay").toInt();
+    if (ms < 1) ms = 1;
+    if (ms > 30) ms = 30;
+    _lift.setStepDelay(ms);
+    json = "{\"success\":true}\n";
     _server.send(200, "application/json", json);
 }
 
