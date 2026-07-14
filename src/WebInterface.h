@@ -34,6 +34,9 @@ private:
     // --- HTTP-Route-Handler ---
     void _handleRoot();
     void _handleStatus();
+    void _handleToggle();
+    void _handleJogStart();
+    void _handleJogStop();
     void _handleMoveTop();
     void _handleMoveBottom();
     void _handleSetTop();

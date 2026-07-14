@@ -163,8 +163,42 @@ void Tonarmlift::startMoveTo(int target)
             targetStep, stepCount, stepsRemaining, moveDirection);
 }
 
+void Tonarmlift::startJog(int direction) {
+    if (direction == 0) return;
+    // Bestehende Bewegung abbrechen
+    nonBlockingActive = false;
+    joggingActive = true;
+    jogDirection = (direction > 0) ? +1 : -1;
+    nextStepUs = micros();
+    _isMoving = true;
+    DPRINTF("startJog: dir=%d\n", jogDirection);
+}
+
+void Tonarmlift::stopJog() {
+    if (!joggingActive) return;
+    joggingActive = false;
+    _isMoving = false;
+    disableMotor();
+    savePosition();
+    DPRINTF("stopJog at stepCount=%d\n", stepCount);
+}
+
+bool Tonarmlift::isJogging() {
+    return joggingActive;
+}
+
 void Tonarmlift::update()
 {
+    // --- Jogging-Update: max. 1 Schritt pro Aufruf für feinfühlige Steuerung ---
+    if (joggingActive) {
+        uint32_t nowUs = micros();
+        if ((int32_t)(nowUs - nextStepUs) >= 0) {
+            stepMotor(jogDirection, computeStepPwm());
+            nextStepUs = nowUs + computeStepIntervalUs();
+        }
+        return;
+    }
+
     if (!nonBlockingActive) return;
 
     const uint8_t maxStepsPerUpdate = 10;

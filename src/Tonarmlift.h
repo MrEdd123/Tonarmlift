@@ -72,6 +72,17 @@ public:
     /// @brief Speichert die aktuelle Position in Preferences
     void savePosition();
 
+    /// @brief Startet Dauerbewegung (Jogging) in eine Richtung.
+    ///        Läuft so lange, bis stopJog() aufgerufen wird.
+    ///        @param direction +1 = vorwärts, -1 = rückwärts
+    void startJog(int direction);
+
+    /// @brief Stoppt eine Jogging-Bewegung (schaltet Motor ab).
+    void stopJog();
+
+    /// @brief Gibt true zurück, wenn gerade gejoggt wird
+    bool isJogging();
+
     /// @brief Gibt true zurück, wenn eine Bewegung läuft
     bool isMoving();
 
@@ -98,6 +109,9 @@ private:
     int stepsRemaining = 0;
     uint32_t nextStepUs = 0;
     uint32_t stepIntervalUs = 5000;
+
+    bool joggingActive = false;
+    int jogDirection = 0;
 
     int refTop = 1024;
     int refBottom = 0;

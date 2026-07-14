@@ -29,11 +29,14 @@ void WebInterface::begin() {
     // --- Routen registrieren ---
     _server.on("/",              HTTP_GET, [this](){ _handleRoot(); });
     _server.on("/status",        HTTP_GET, [this](){ _handleStatus(); });
+    _server.on("/toggle",        HTTP_POST, [this](){ _handleToggle(); });
+    _server.on("/jogStart",      HTTP_POST, [this](){ _handleJogStart(); });
+    _server.on("/jogStop",       HTTP_POST, [this](){ _handleJogStop(); });
     _server.on("/moveTop",       HTTP_POST, [this](){ _handleMoveTop(); });
     _server.on("/moveBottom",    HTTP_POST, [this](){ _handleMoveBottom(); });
     _server.on("/setRefTop",     HTTP_POST, [this](){ _handleSetTop(); });
     _server.on("/setRefBottom",  HTTP_POST, [this](){ _handleSetBottom(); });
-    _server.on("/move",          HTTP_POST, [this](){ _handleMove(); });
+    _server.on("/moveToPos",     HTTP_POST, [this](){ _handleMove(); });
     _server.onNotFound([this](){ _handleNotFound(); });
 
     _server.begin();
@@ -87,8 +90,17 @@ String WebInterface::_buildHtmlPage() {
          font-size: 1rem; font-weight: 600; cursor: pointer; transition: all 0.15s; }
   .btn:active { transform: scale(0.97); }
   .btn:disabled { opacity: 0.5; pointer-events: none; }
-  .btn-up { background: #2ecc71; color: #fff; margin-bottom: 8px; }
-  .btn-down { background: #e94560; color: #fff; margin-bottom: 20px; }
+  .btn-toggle { background: #0f3460; color: #fff; margin-bottom: 20px;
+                font-size: 1.1rem; padding: 16px; border: 2px solid #533483; }
+  .btn-jog { display: block; width: 100%; padding: 20px; border: none; border-radius: 12px;
+             font-size: 1.3rem; font-weight: 700; cursor: pointer; transition: all 0.1s;
+             -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+  .btn-jog:active { transform: scale(0.95); }
+  .btn-jog:disabled { opacity: 0.5; pointer-events: none; }
+  .btn-jog-up { background: #2ecc71; color: #fff; margin-bottom: 6px; }
+  .btn-jog-down { background: #e94560; color: #fff; margin-bottom: 20px; }
+  .btn-jog-up:active { background: #27ae60; }
+  .btn-jog-down:active { background: #c0392b; }
   .section-title { font-size: 0.85rem; text-transform: uppercase; opacity: 0.6;
                    margin: 20px 0 10px; }
   .btn-set { background: #533483; color: #fff; margin-bottom: 8px; }
@@ -122,8 +134,23 @@ String WebInterface::_buildHtmlPage() {
     </div>
   </div>
 
-  <button class="btn btn-up"   id="btnUp"   onclick="moveTop()">   ▲  Hochfahren</button>
-  <button class="btn btn-down" id="btnDown" onclick="moveBottom()">▼  Runterfahren</button>
+  <!-- Press-and-Hold: Lift bewegt sich, solange gedrückt -->
+  <div class="section-title">Manuelle Positionierung (gedrückt halten)</div>
+  <button class="btn-jog btn-jog-up"    id="btnUp"
+    onmousedown="jogStart(1)"  onmouseup="jogStop()"   onmouseleave="jogStop()"
+    ontouchstart="jogStart(1)" ontouchend="jogStop()"  ontouchcancel="jogStop()">
+    ▲  Hoch
+  </button>
+  <button class="btn-jog btn-jog-down"  id="btnDown"
+    onmousedown="jogStart(-1)" onmouseup="jogStop()"   onmouseleave="jogStop()"
+    ontouchstart="jogStart(-1)" ontouchend="jogStop()" ontouchcancel="jogStop()">
+    ▼  Runter
+  </button>
+
+  <!-- Umschalten zwischen den Endpunkten -->
+  <button class="btn btn-toggle" id="btnToggle" onclick="doToggle()">
+    ⟳  Zum anderen Endpunkt
+  </button>
 
   <div class="section-title">Endpunkte setzen (aktuelle Position)</div>
   <button class="btn btn-set" onclick="setRefTop()">   ⬆  Als oberen Endpunkt speichern</button>
@@ -134,8 +161,10 @@ String WebInterface::_buildHtmlPage() {
 
 <script>
 const API = '';
-const btnUp   = document.getElementById('btnUp');
-const btnDown = document.getElementById('btnDown');
+const btnJogUp   = document.getElementById('btnUp');
+const btnJogDown = document.getElementById('btnDown');
+const btnToggle  = document.getElementById('btnToggle');
+let jogActive = false;
 const toastEl = document.getElementById('toast');
 
 function showToast(msg, error) {
@@ -145,10 +174,14 @@ function showToast(msg, error) {
   setTimeout(() => { toastEl.style.display = 'none'; }, 2500);
 }
 
-function setMovingUI(moving) {
-  btnUp.disabled   = moving;
-  btnDown.disabled = moving;
-  document.getElementById('status').textContent = moving ? 'Fährt...' : 'Bereit';
+function setMovingUI(moving, targetText) {
+  btnToggle.disabled = moving;
+  // Jog-Buttons nur deaktivieren, wenn eine Zielbewegung (nonBlocking) läuft, nicht beim Joggen selbst
+  if (!jogActive) {
+    btnJogUp.disabled   = moving;
+    btnJogDown.disabled = moving;
+  }
+  document.getElementById('status').textContent = moving ? (targetText || 'Fährt...') : 'Bereit';
 }
 
 function fetchStatus() {
@@ -160,15 +193,76 @@ function fetchStatus() {
       document.getElementById('refBottom').textContent = d.refBottom;
       if (!d.moving) {
         document.getElementById('status').textContent = 'Bereit';
-        btnUp.disabled   = false;
-        btnDown.disabled = false;
+        btnToggle.disabled = false;
+        if (!jogActive) {
+          btnJogUp.disabled   = false;
+          btnJogDown.disabled = false;
+        }
       }
     })
     .catch(() => {});
 }
 
+function jogStart(dir) {
+  if (jogActive) return;
+  jogActive = true;
+  btnJogUp.disabled   = true;
+  btnJogDown.disabled = true;
+  btnToggle.disabled  = true;
+  document.getElementById('status').textContent = dir > 0 ? 'Hoch...' : 'Runter...';
+  fetch(API + '/jogStart', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'direction=' + dir
+  }).catch(() => {});
+}
+
+function jogStop() {
+  if (!jogActive) return;
+  jogActive = false;
+  fetch(API + '/jogStop', { method:'POST' })
+    .then(() => { fetchStatus(); })
+    .catch(() => {});
+}
+
+function doToggle() {
+  setMovingUI(true, 'Ermittle Ziel...');
+  // Erst Status abfragen, dann entscheiden
+  fetch(API + '/status')
+    .then(r => r.json())
+    .then(d => {
+      if (d.moving) {
+        showToast('Lift bereits in Bewegung', true);
+        setMovingUI(false);
+        return;
+      }
+      const distTop = Math.abs(d.refTop - d.position);
+      const distBottom = Math.abs(d.position - d.refBottom);
+      if (distTop <= distBottom) {
+        // Wir sind oben oder näher an oben → nach unten
+        setMovingUI(true, 'Fahre nach unten...');
+        return fetch(API + '/moveBottom', { method:'POST' })
+          .then(r => r.json())
+          .then(d2 => {
+            if (d2.success) showToast('Fahre nach unten');
+            else { showToast(d2.error || 'Fehler', true); setMovingUI(false); }
+          });
+      } else {
+        // Wir sind unten oder näher an unten → nach oben
+        setMovingUI(true, 'Fahre nach oben...');
+        return fetch(API + '/moveTop', { method:'POST' })
+          .then(r => r.json())
+          .then(d2 => {
+            if (d2.success) showToast('Fahre nach oben');
+            else { showToast(d2.error || 'Fehler', true); setMovingUI(false); }
+          });
+      }
+    })
+    .catch(() => { showToast('Verbindungsfehler', true); setMovingUI(false); });
+}
+
 function moveTop() {
-  setMovingUI(true);
+  setMovingUI(true, 'Fahre nach oben...');
   fetch(API + '/moveTop', { method:'POST' })
     .then(r => r.json())
     .then(d => {
@@ -179,7 +273,7 @@ function moveTop() {
 }
 
 function moveBottom() {
-  setMovingUI(true);
+  setMovingUI(true, 'Fahre nach unten...');
   fetch(API + '/moveBottom', { method:'POST' })
     .then(r => r.json())
     .then(d => {
@@ -234,6 +328,66 @@ void WebInterface::_handleStatus() {
 }
 
 // ============================================================
+//  Route: Jogging starten (direction=1 oder -1)
+// ============================================================
+void WebInterface::_handleJogStart() {
+    String json;
+    if (!_server.hasArg("direction")) {
+        json = "{\"success\":false,\"error\":\"Parameter 'direction' fehlt\"}\n";
+        _server.send(400, "application/json", json);
+        return;
+    }
+    int dir = _server.arg("direction").toInt();
+    if (dir == 0) {
+        json = "{\"success\":false,\"error\":\"direction muss +1 oder -1 sein\"}\n";
+        _server.send(400, "application/json", json);
+        return;
+    }
+    // Bestehende Bewegung abbrechen, falls vorhanden
+    if (_lift.isMoving()) {
+        _lift.stopJog();
+    }
+    _lift.startJog(dir);
+    json = "{\"success\":true}\n";
+    _server.send(200, "application/json", json);
+}
+
+// ============================================================
+//  Route: Jogging stoppen
+// ============================================================
+void WebInterface::_handleJogStop() {
+    _lift.stopJog();
+    String json = "{\"success\":true}\n";
+    _server.send(200, "application/json", json);
+}
+
+// ============================================================
+//  Route: Umschalten (Toggle – fährt zum jeweils anderen Endpunkt)
+// ============================================================
+void WebInterface::_handleToggle() {
+    String json;
+    if (_lift.isMoving()) {
+        json = "{\"success\":false,\"error\":\"Lift ist bereits in Bewegung\"}\n";
+        _server.send(200, "application/json", json);
+        return;
+    }
+
+    int pos = _lift.getPosition();
+    int distTop = abs(_lift.getRefTop() - pos);
+    int distBottom = abs(pos - _lift.getRefBottom());
+
+    if (distTop <= distBottom) {
+        // Näher an oben → fahre nach unten
+        _lift.startMoveTo(_lift.getRefBottom());
+    } else {
+        // Näher an unten → fahre nach oben
+        _lift.startMoveTo(_lift.getRefTop());
+    }
+    json = "{\"success\":true}\n";
+    _server.send(200, "application/json", json);
+}
+
+// ============================================================
 //  Route: Hochfahren (move to refTop)
 // ============================================================
 void WebInterface::_handleMoveTop() {
@@ -277,7 +431,8 @@ void WebInterface::_handleSetTop() {
 //  Route: Aktuelle Position als unteren Endpunkt speichern
 // ============================================================
 void WebInterface::_handleSetBottom() {
-    _lift.setRefBottom(_lift.getPosition());
+    _lift.setPosition(0);
+    _lift.setRefBottom(0);
     _lift.savePosition();
     String json = "{\"success\":true}\n";
     _server.send(200, "application/json", json);
