@@ -1,5 +1,5 @@
 /**
- * Beispiel-Sketch für den isolierten Tonarmlift.
+ * Tonarmlift Standalone mit Webinterface.
  *
  * Hardware:
  *   - ESP32 (z. B. ESP32-S3-DevKitC-1)
@@ -13,14 +13,16 @@
  *   LIFT_IB1 (GPIO 41) → B- (Motor-Spule B)
  *
  * Funktion:
- *   - Nach dem Boot fährt der Lift zur Position "oben" (refTop).
- *   - Dann alle 3 Sekunden zwischen "oben" und "unten" hin und her.
- *   - Über Serial (115200 Baud) werden Statusmeldungen ausgegeben.
+ *   - Der ESP32 startet einen WLAN-Access-Point ("Tonarmlift-AP").
+ *   - Über einen Browser (IP 192.168.4.1) kann der Lift gesteuert werden.
+ *   - Tasten: Hochfahren / Runterfahren
+ *   - Endpunkte: Aktuelle Position als "oben" oder "unten" speichern
  */
 
 #include <Arduino.h>
 #include <Preferences.h>
 #include "Tonarmlift.h"
+#include "WebInterface.h"
 
 // -------------------- Pin-Definitionen (anpassen!) --------------------
 #define LIFT_IA2 2   // A+
@@ -38,12 +40,13 @@ const int STEP_DELAY_MS = 5;    // Verzögerung zwischen Schritten (1-30 ms)
 Preferences prefs;
 Tonarmlift lift(LIFT_IA2, LIFT_IA1, LIFT_IB2, LIFT_IB1,
                 MICROSTEPS, PWM_FREQ, PWM_RES);
+WebInterface web(lift);
 
 // -------------------- Setup --------------------
 void setup() {
     Serial.begin(115200);
     delay(500);
-    Serial.println("\n=== Tonarmlift Standalone ===");
+    Serial.println("\n=== Tonarmlift Standalone mit Webinterface ===");
 
     // Preferences-Namespace "lift" öffnen
     prefs.begin("lift", false);
@@ -59,14 +62,8 @@ void setup() {
     Serial.printf("RefTop:   %d\n", lift.getRefTop());
     Serial.printf("RefBottom:%d\n", lift.getRefBottom());
 
-    // Referenzen setzen (bei Erstinbetriebnahme anpassen!)
-    // lift.setRefTop(1024);
-    // lift.setRefBottom(0);
-
-    // Einmalig zur oberen Position fahren
-    Serial.println("Fahre zur oberen Position...");
-    lift.moveToTop();
-    Serial.printf("Angekommen bei Position %d\n", lift.getPosition());
+    // Webinterface starten (WLAN-AP + Webserver)
+    web.begin();
 }
 
 // -------------------- Loop --------------------
@@ -74,22 +71,6 @@ void loop() {
     // Nicht-blockierende Lift-Updates (wichtig, wenn startMoveTo verwendet wird)
     lift.update();
 
-    // Alle 3 Sekunden zwischen oben und unten wechseln
-    static unsigned long lastToggle = 0;
-    if (millis() - lastToggle > 3000 && !lift.isMoving()) {
-        lastToggle = millis();
-
-        int pos = lift.getPosition();
-        int distTop = abs(lift.getRefTop() - pos);
-        int distBottom = abs(pos - lift.getRefBottom());
-
-        if (distTop <= distBottom) {
-            Serial.println("Fahre nach unten...");
-            lift.moveToBottom();
-        } else {
-            Serial.println("Fahre nach oben...");
-            lift.moveToTop();
-        }
-        Serial.printf("Position: %d\n", lift.getPosition());
-    }
+    // Webinterface: eingehende HTTP-Requests bearbeiten
+    web.handleClient();
 }
